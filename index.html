@@ -444,19 +444,25 @@
 
         // Load data from persistent storage
         async function loadData() {
+            // Load meals
             try {
                 const mealsResult = await window.storage.get('meals');
-                const skipResult = await window.storage.get('skipUntil');
-                
                 if (mealsResult && mealsResult.value) {
                     meals = JSON.parse(mealsResult.value);
                 }
+            } catch (error) {
+                // Key doesn't exist yet, start with empty array
+                meals = [];
+            }
+            
+            // Load skipUntil
+            try {
+                const skipResult = await window.storage.get('skipUntil');
                 if (skipResult && skipResult.value) {
                     skipUntil = JSON.parse(skipResult.value);
                 }
             } catch (error) {
-                // Keys don't exist yet, start with empty data
-                meals = [];
+                // Key doesn't exist yet, start with empty object
                 skipUntil = {};
             }
             
@@ -468,10 +474,14 @@
         async function saveData() {
             try {
                 await window.storage.set('meals', JSON.stringify(meals));
+            } catch (error) {
+                console.error('Greška pri čuvanju obroka:', error);
+            }
+            
+            try {
                 await window.storage.set('skipUntil', JSON.stringify(skipUntil));
             } catch (error) {
-                console.error('Error saving data:', error);
-                alert('Greška pri čuvanju podataka. Molim te pokušaj ponovo.');
+                console.error('Greška pri čuvanju preskočenih obroka:', error);
             }
         }
 
