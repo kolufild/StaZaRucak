@@ -378,6 +378,12 @@
             width: 80px;
         }
 
+        .loading {
+            text-align: center;
+            padding: 2rem;
+            color: var(--olive);
+        }
+
         @media (max-width: 768px) {
             h1 {
                 font-size: 2.2rem;
@@ -412,7 +418,9 @@
 
         <!-- Suggestion View -->
         <div id="suggest-view" class="view active">
-            <div id="suggestion-container"></div>
+            <div id="suggestion-container">
+                <div class="loading">Učitavam...</div>
+            </div>
         </div>
 
         <!-- Manage View -->
@@ -432,75 +440,58 @@
 
             <div class="card">
                 <h2>Tvoji Obroci</h2>
-                <div id="meals-list" class="meal-list"></div>
+                <div id="meals-list" class="meal-list">
+                    <div class="loading">Učitavam...</div>
+                </div>
             </div>
         </div>
     </div>
 
-    <script>
-        // Initialize storage
-        let meals = [];
-        let skipUntil = {}; // Track meals to skip with dates
+    <!-- Firebase SDK -->
+    <script type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
+        import { getFirestore, collection, doc, getDocs, setDoc, deleteDoc, onSnapshot } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 
-        // Load data from persistent storage
-        async function loadData() {
-            // Load meals
-            try {
-                const mealsResult = await window.storage.get('meals');
-                if (mealsResult && mealsResult.value) {
-                    meals = JSON.parse(mealsResult.value);
-                }
-            } catch (error) {
-                // Key doesn't exist yet, start with empty array
-                meals = [];
-            }
-            
-            // Load skipUntil
-            try {
-                const skipResult = await window.storage.get('skipUntil');
-                if (skipResult && skipResult.value) {
-                    skipUntil = JSON.parse(skipResult.value);
-                }
-            } catch (error) {
-                // Key doesn't exist yet, start with empty object
-                skipUntil = {};
-            }
-            
+        // Firebase configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyCwukFznZb7jGMDdKp6_xfILV6lCXsqaPE",
+            authDomain: "stazarucak.firebaseapp.com",
+            projectId: "stazarucak",
+            storageBucket: "stazarucak.firebasestorage.app",
+            messagingSenderId: "733102819005",
+            appId: "1:733102819005:web:554c6f4d10512755b319d4",
+            measurementId: "G-677CQR1Y16"
+        };
+
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        // Global variables
+        let meals = [];
+        let skipUntil = {};
+
+        // Real-time listener for meals
+        onSnapshot(collection(db, 'meals'), (snapshot) => {
+            meals = [];
+            snapshot.forEach((doc) => {
+                meals.push({ id: doc.id, ...doc.data() });
+            });
             renderMealsList();
             renderSuggestion();
-        }
+        });
 
-        // Save data to persistent storage
-        async function saveData() {
-            try {
-                await window.storage.set('meals', JSON.stringify(meals));
-            } catch (error) {
-                console.error('Greška pri čuvanju obroka:', error);
-            }
-            
-            try {
-                await window.storage.set('skipUntil', JSON.stringify(skipUntil));
-            } catch (error) {
-                console.error('Greška pri čuvanju preskočenih obroka:', error);
-            }
-        }
+        // Real-time listener for skipUntil
+        onSnapshot(collection(db, 'skipUntil'), (snapshot) => {
+            skipUntil = {};
+            snapshot.forEach((doc) => {
+                skipUntil[doc.id] = doc.data().skipDate;
+            });
+            renderSuggestion();
+        });
 
-        function switchTab(tab) {
-            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-            document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
-            
-            if (tab === 'suggest') {
-                document.querySelector('.tab:nth-child(1)').classList.add('active');
-                document.getElementById('suggest-view').classList.add('active');
-                renderSuggestion();
-            } else {
-                document.querySelector('.tab:nth-child(2)').classList.add('active');
-                document.getElementById('manage-view').classList.add('active');
-                renderMealsList();
-            }
-        }
-
-        async function addMeal() {
+        // Add meal to Firebase
+        window.addMeal = async function() {
             const name = document.getElementById('meal-name').value.trim();
             const frequency = parseInt(document.getElementById('meal-frequency').value);
 
@@ -514,34 +505,45 @@
                 return;
             }
 
-            const meal = {
-                id: Date.now(),
-                name: name,
-                frequency: frequency,
-                lastMade: null
-            };
+            const mealId = Date.now().toString();
+            
+            try {
+                await setDoc(doc(db, 'meals', mealId), {
+                    name: name,
+                    frequency: frequency,
+                    lastMade: null
+                });
 
-            meals.push(meal);
-            await saveData();
+                document.getElementById('meal-name').value = '';
+                document.getElementById('meal-frequency').value = '7';
 
-            document.getElementById('meal-name').value = '';
-            document.getElementById('meal-frequency').value = '7';
-
-            renderMealsList();
-            alert('Obrok uspešno dodat!');
-        }
-
-        async function deleteMeal(id) {
-            if (confirm('Da li si siguran da želiš da obrišeš ovaj obrok?')) {
-                meals = meals.filter(m => m.id !== id);
-                delete skipUntil[id];
-                await saveData();
-                renderMealsList();
-                renderSuggestion();
+                alert('Obrok uspešno dodat!');
+            } catch (error) {
+                console.error('Greška:', error);
+                alert('Greška pri dodavanju obroka. Pokušaj ponovo.');
             }
-        }
+        };
 
-        function editMeal(id) {
+        // Delete meal from Firebase
+        window.deleteMeal = async function(id) {
+            if (confirm('Da li si siguran da želiš da obrišeš ovaj obrok?')) {
+                try {
+                    await deleteDoc(doc(db, 'meals', id));
+                    // Also delete from skipUntil if exists
+                    try {
+                        await deleteDoc(doc(db, 'skipUntil', id));
+                    } catch (e) {
+                        // Doesn't exist, that's ok
+                    }
+                } catch (error) {
+                    console.error('Greška:', error);
+                    alert('Greška pri brisanju obroka.');
+                }
+            }
+        };
+
+        // Edit meal
+        window.editMeal = function(id) {
             const meal = meals.find(m => m.id === id);
             if (!meal) return;
 
@@ -552,13 +554,14 @@
                 <div class="edit-mode">
                     <input type="text" id="edit-name-${id}" value="${meal.name}" />
                     <input type="number" id="edit-freq-${id}" value="${meal.frequency}" min="1" />
-                    <button class="btn btn-small btn-primary" onclick="saveEdit(${id})">Sačuvaj</button>
+                    <button class="btn btn-small btn-primary" onclick="saveEdit('${id}')">Sačuvaj</button>
                     <button class="btn btn-small btn-outline" onclick="renderMealsList()">Otkaži</button>
                 </div>
             `;
-        }
+        };
 
-        async function saveEdit(id) {
+        // Save edited meal
+        window.saveEdit = async function(id) {
             const name = document.getElementById(`edit-name-${id}`).value.trim();
             const frequency = parseInt(document.getElementById(`edit-freq-${id}`).value);
 
@@ -569,14 +572,37 @@
 
             const meal = meals.find(m => m.id === id);
             if (meal) {
-                meal.name = name;
-                meal.frequency = frequency;
-                await saveData();
+                try {
+                    await setDoc(doc(db, 'meals', id), {
+                        name: name,
+                        frequency: frequency,
+                        lastMade: meal.lastMade
+                    });
+                } catch (error) {
+                    console.error('Greška:', error);
+                    alert('Greška pri izmeni obroka.');
+                }
+            }
+        };
+
+        // Switch tabs
+        window.switchTab = function(tab) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+            
+            if (tab === 'suggest') {
+                document.querySelector('.tab:nth-child(1)').classList.add('active');
+                document.getElementById('suggest-view').classList.add('active');
+                renderSuggestion();
+            } else {
+                document.querySelector('.tab:nth-child(2)').classList.add('active');
+                document.getElementById('manage-view').classList.add('active');
                 renderMealsList();
             }
-        }
+        };
 
-        function renderMealsList() {
+        // Render meals list
+        window.renderMealsList = function() {
             const container = document.getElementById('meals-list');
             
             if (meals.length === 0) {
@@ -596,13 +622,14 @@
                         <div class="meal-frequency">Svakih ${meal.frequency} ${meal.frequency === 1 ? 'dan' : meal.frequency < 5 ? 'dana' : 'dana'} · ${meal.lastMade ? `Poslednji put: ${new Date(meal.lastMade).toLocaleDateString('sr-RS')}` : 'Nikad spremljeno'}</div>
                     </div>
                     <div class="meal-actions">
-                        <button class="btn btn-small btn-secondary" onclick="editMeal(${meal.id})">Izmeni</button>
-                        <button class="btn btn-small btn-outline" onclick="deleteMeal(${meal.id})">Obriši</button>
+                        <button class="btn btn-small btn-secondary" onclick="editMeal('${meal.id}')">Izmeni</button>
+                        <button class="btn btn-small btn-outline" onclick="deleteMeal('${meal.id}')">Obriši</button>
                     </div>
                 </div>
             `).join('');
-        }
+        };
 
+        // Get next suggestion
         function getNextSuggestion() {
             const today = new Date();
             today.setHours(0, 0, 0, 0);
@@ -613,8 +640,6 @@
                     const skipDate = new Date(skipUntil[meal.id]);
                     if (skipDate > today) {
                         return false; // Still skipped
-                    } else {
-                        delete skipUntil[meal.id]; // Skip period expired
                     }
                 }
                 return true;
@@ -643,32 +668,47 @@
             return mealsWithNext[0];
         }
 
-        async function markMade(id) {
+        // Mark meal as made
+        window.markMade = async function(id) {
             const meal = meals.find(m => m.id === id);
             if (meal) {
-                meal.lastMade = new Date().toISOString();
-                await saveData();
-                renderSuggestion();
+                try {
+                    await setDoc(doc(db, 'meals', id), {
+                        name: meal.name,
+                        frequency: meal.frequency,
+                        lastMade: new Date().toISOString()
+                    });
+                } catch (error) {
+                    console.error('Greška:', error);
+                    alert('Greška pri ažuriranju obroka.');
+                }
             }
-        }
+        };
 
-        async function skipMeal(id) {
-            await saveData(); // Just refresh to get next suggestion
+        // Skip meal (just refresh suggestion)
+        window.skipMeal = function(id) {
             renderSuggestion();
-        }
+        };
 
-        async function skipForDays(id) {
+        // Skip meal for days
+        window.skipForDays = async function(id) {
             const today = new Date();
             today.setHours(0, 0, 0, 0);
             const skipDate = new Date(today);
             skipDate.setDate(skipDate.getDate() + 3); // Skip for 3 days
             
-            skipUntil[id] = skipDate.toISOString();
-            await saveData();
-            renderSuggestion();
-        }
+            try {
+                await setDoc(doc(db, 'skipUntil', id), {
+                    skipDate: skipDate.toISOString()
+                });
+            } catch (error) {
+                console.error('Greška:', error);
+                alert('Greška pri preskakanju obroka.');
+            }
+        };
 
-        function renderSuggestion() {
+        // Render suggestion
+        window.renderSuggestion = function() {
             const container = document.getElementById('suggestion-container');
             
             if (meals.length === 0) {
@@ -715,16 +755,13 @@
                     <div class="suggested-meal">${suggestion.name}</div>
                     <p style="opacity: 0.9; margin-bottom: 2rem;">${statusText}</p>
                     <div class="suggestion-buttons">
-                        <button class="btn" onclick="markMade(${suggestion.id})">✓ OK, spravićemo to</button>
-                        <button class="btn" onclick="skipMeal(${suggestion.id})">→ Ne, predloži nešto drugo</button>
-                        <button class="btn" onclick="skipForDays(${suggestion.id})">⏸ Preskoči za nekoliko dana</button>
+                        <button class="btn" onclick="markMade('${suggestion.id}')">✓ OK, spravićemo to</button>
+                        <button class="btn" onclick="skipMeal('${suggestion.id}')">→ Ne, predloži nešto drugo</button>
+                        <button class="btn" onclick="skipForDays('${suggestion.id}')">⏸ Preskoči za nekoliko dana</button>
                     </div>
                 </div>
             `;
-        }
-
-        // Load data on page load
-        loadData();
+        };
     </script>
 </body>
 </html>
